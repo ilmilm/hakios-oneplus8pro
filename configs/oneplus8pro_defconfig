@@ -1,0 +1,4 @@
+# HakiOS defconfig for the OnePlus 8 Pro (oneplus8pro): the common kernel, the sm8250 family's facts, and this device's own.
+#include common_defconfig
+#include sm8250.config
+#include oneplus8pro.config
