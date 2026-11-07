@@ -1,12 +1,23 @@
+# devices/oneplus8pro/soc.args: the soc_* boot-args of the OnePlus 8 Pro (kona), read out of its own device tree
+# (artifacts/fdt.dtb, the phone's /sys/firmware/fdt) with tools/soc-args.py, by hand where kona's node names
+# differ from what it looks for. The run scripts drop comment lines (tools/soc-only-changes.sh).
 soc_ipa_base=0x1e40000
 soc_gsi_base=0x1e04000
 soc_ipcc=0x408000
 soc_aoss=0xc300000
 soc_rsc=0x18220000
 soc_apps_smmu=0x15000000
+soc_cmd_db=0x80860000
+# soc_mpss_mem=(not in this tree): the OnePlus 8 Pro's device tree has no reserved-memory node named mpss and no
+# qcom,mss node at all -- the modem's image region is not in it. Fill from the phone at bring-up (the driver's
+# default is the POCO's 0x8b800000 until then; hakios.mpss.c takes the boot-arg when the port runs).
+modem_ipa_fw_at=0x8e210000
 soc_smem=0x80900000
 soc_imem=0x14600000
 soc_ipa_stream=0x5c0
 soc_ipa_stream_uc=0x5c2
+# soc_pas_mpss=(not in this tree): no qcom,mss node with a qcom,pas-id -- the tree carries PAS ids only for the
+# non-modem peripherals (ipa_fws 0xf, venus 9, spss 0xe, ssc 0xc, ...). Fill from the phone at bring-up (the
+# driver's default is the POCO's 0x4 until then).
 soc_pas_ipa=0xf
 soc_ipa_fw=ipa_fws
