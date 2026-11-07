@@ -1,0 +1,268 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * The OnePlus 8 Pro 5G (IN2020, "instantnoodlep", SM8250 "kona") for HakiOS's U-Boot.
+ *
+ * Same idea as the POCO X5 Pro's (sm7325-xiaomi-redwood.dts): only what U-Boot needs -- the memory the
+ * firmware and the remote processors keep, the panel's framebuffer as the bootloader left it, the keys,
+ * USB as a device (fastboot) and UFS.
+ *
+ * Where every value comes from:
+ *   [fdt]     the phone's own Android device tree as ABL hands it over (artifacts/fdt.dtb, sha256
+ *             60a2cba1..., 900003 B, parsed with fdt_soc_lookup.py's parser); node names below follow it
+ *   [UniXNU]  zhangp996/UniXNU-instantnoodlep-10-27's measured table (PORT_PLAN.md "先行工作参考 A")
+ *   [dtsi]    unchanged from U-Boot v2026.07's dts/upstream/src/arm64/qcom/sm8250.dtsi
+ *   [待实机验证] ABL's leftovers that could not be measured here yet
+ *
+ * The size of RAM is not in it: ABL writes it into the device tree it hands over (the appended Android
+ * one), and U-Boot reads it from there -- the built-in tree has no /memory on purpose, so board.c's
+ * qcom_parse_memory() falls back to ABL's (the phone's real banks: 0x80000000+0x3bb00000,
+ * 0xc0000000+0xc0000000, 0x180000000+0x100000000, [UniXNU]).
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
+#include "sm8250.dtsi"
+#include "pm8150.dtsi"  /* the pon keys and the volume keys' GPIOs */
+#include "pm8150b.dtsi" /* the charger (SMB5) */
+#include "pm8150l.dtsi" /* the display's backlight and flash */
+
+/ {
+	model = "OnePlus 8 Pro 5G (IN2020)";
+	compatible = "oneplus,instantnoodlep", "qcom,sm8250";
+	chassis-type = "handset";
+
+	/* what ABL matches against; the phone's own tree says the same [fdt] */
+	qcom,msm-id = <QCOM_ID_SM8250 0x20001>;
+	qcom,board-id = <0x10008 0x0>;
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * The panel as ABL left it: Samsung ANA6706, DSC command mode, 1440 x 3168 (the bootargs name
+		 * msm_drm.dsi_display0=qcom,mdss_dsi_oppo19811_samsung_1440_3168_dsc_cmd [fdt]). The splash is
+		 * cont_splash_region: 0x9c000000 + 0x2300000 [fdt, UniXNU]. 32 bits a8r8g8b8, as on the other
+		 * sm8250 boards; ABL's actual pitch and byte order have not been measured on this phone yet
+		 * [待实机验证]. No clocks: U-Boot keeps the display running by not touching it.
+		 */
+		framebuffer0: framebuffer@9c000000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0x9c000000 0x0 (1440 * 3168 * 4)>;
+			width = <1440>;
+			height = <3168>;
+			stride = <(1440 * 4)>;
+			format = "a8r8g8b8";
+		};
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-0 = <&vol_up_n>, <&vol_down_n>;
+		pinctrl-names = "default";
+
+		key-volume-up {
+			label = "Volume Up";
+			gpios = <&pm8150_gpios 6 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <15>;
+		};
+
+		key-volume-down {
+			label = "Volume Down";
+			gpios = <&pm8150_gpios 7 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <15>;
+		};
+	};
+
+	reserved-memory {
+		/*
+		 * The phone's own reservations that sm8250.dtsi has no node for [fdt]. disp_rdump_region
+		 * (0x9c000000 + 0x800000, the display's ramdump copy) lies inside the splash and is left out:
+		 * the reservation below covers the framebuffer.
+		 */
+		cont_splash_mem: cont-splash@9c000000 {
+			reg = <0x0 0x9c000000 0x0 0x2300000>;
+			no-map;
+		};
+
+		/* the display's dfps data [fdt] */
+		dfps_data_mem: dfps-data@9e300000 {
+			reg = <0x0 0x9e300000 0x0 0x100000>;
+			no-map;
+		};
+
+		/* the kernel's pram (panic log) where UniXNU measured it [UniXNU, 待实机验证: not in this fdt] */
+		pram_mem: pram@9f400000 {
+			reg = <0x0 0x9f400000 0x0 0x80000>;
+			no-map;
+		};
+
+		/* OPLUS's own xbl/kboot log [fdt, compatible "oplus,xbl_uefi_kbootlog"] */
+		kboot_log_mem: kboot-uboot-logmem@9fe00000 {
+			reg = <0x0 0x9fe00000 0x0 0x200000>;
+			no-map;
+		};
+
+		/* Android's ramoops [fdt, compatible "ramoops"] */
+		ramoops_mem: ramoops@b0000000 {
+			reg = <0x0 0xb0000000 0x0 0x400000>;
+			no-map;
+		};
+
+		/*
+		 * Where the HakiOS loader takes its payload from (PAYLOAD_BASE, 64 MiB with the panic log in its
+		 * last MiB). Mapped (no no-map): the hakios command writes the payload here, and nothing else in
+		 * U-Boot may take it.
+		 */
+		hakios_payload_mem: hakios-payload@f0000000 {
+			reg = <0x0 0xf0000000 0x0 0x4000000>;
+		};
+	};
+};
+
+/*
+ * The MTP's carve-outs are at other addresses or sizes on the phone [fdt] (the phone names them
+ * pil_camera_region@8dc00000 and the like). The same labels, the phone's values:
+ *   removed_region@80b00000  +0xcd00000   (the MTP reserved only 0x5300000 there)
+ *   pil_camera_region@8dc00000   +0x500000
+ *   pil_wlan_fw_region@8e100000  +0x100000
+ *   pil_ipa_fw_region@8e200000   +0x10000
+ *   pil_ipa_gsi_region@8e210000  +0xa000
+ *   pil_gpu_region@8e21a000      +0x2000
+ *   pil_npu_region@8e300000      +0x500000
+ *   pil_video_region@8e800000    +0x500000
+ *   pil_cvp_region@8ed00000      +0x500000
+ *   pil_cdsp_region@8f200000     +0x1400000
+ *   pil_slpi_region@90600000     +0x1500000
+ *   pil_adsp_region@91b00000     +0x2500000
+ *   pil_spss_region@94000000     +0x100000
+ *   cdsp_secure_heap@94100000    +0x4600000
+ * Unchanged from sm8250.dtsi and the same on the phone [fdt]: hyp 0x80000000+0x600000,
+ * xbl/aop 0x80700000+0x160000, cmd-db 0x80860000+0x20000, smem 0x80900000+0x200000.
+ * The phone's tree has no mpss reservation (and no qcom,mss node).
+ */
+&removed_mem {
+	reg = <0x0 0x80b00000 0x0 0xcd00000>;
+};
+
+&camera_mem {
+	reg = <0x0 0x8dc00000 0x0 0x500000>;
+};
+
+&wlan_mem {
+	reg = <0x0 0x8e100000 0x0 0x100000>;
+};
+
+&ipa_fw_mem {
+	reg = <0x0 0x8e200000 0x0 0x10000>;
+};
+
+&ipa_gsi_mem {
+	reg = <0x0 0x8e210000 0x0 0xa000>;
+};
+
+&gpu_mem {
+	reg = <0x0 0x8e21a000 0x0 0x2000>;
+};
+
+&npu_mem {
+	reg = <0x0 0x8e300000 0x0 0x500000>;
+};
+
+&video_mem {
+	reg = <0x0 0x8e800000 0x0 0x500000>;
+};
+
+&cvp_mem {
+	reg = <0x0 0x8ed00000 0x0 0x500000>;
+};
+
+&cdsp_mem {
+	reg = <0x0 0x8f200000 0x0 0x1400000>;
+};
+
+&slpi_mem {
+	reg = <0x0 0x90600000 0x0 0x1500000>;
+};
+
+&adsp_mem {
+	reg = <0x0 0x91b00000 0x0 0x2500000>;
+};
+
+&spss_mem {
+	reg = <0x0 0x94000000 0x0 0x100000>;
+};
+
+&cdsp_secure_heap {
+	reg = <0x0 0x94100000 0x0 0x4600000>;
+};
+
+&pm8150_gpios {
+	/* the volume keys, as the phone's tree configures them [fdt: key_vol_up/key_vol_down_default] */
+	vol_up_n: vol-up-n-state {
+		pins = "gpio6";
+		function = PMIC_GPIO_FUNC_NORMAL;
+		power-source = <1>;
+		bias-pull-up;
+		input-enable;
+	};
+
+	vol_down_n: vol-down-n-state {
+		pins = "gpio7";
+		function = PMIC_GPIO_FUNC_NORMAL;
+		power-source = <1>;
+		bias-pull-up;
+		input-enable;
+	};
+};
+
+&pon_pwrkey {
+	status = "okay";
+};
+
+/* the phone's tree gives RESIN the volume down too [fdt: pon_2 linux,code 114] */
+&pon_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
+};
+
+/*
+ * UFS 3.1 [fdt: ufshc@1d84000 + ufs-phy-qmp-v4@1d87000; interrupts <GIC_SPI 265 IRQ_TYPE_LEVEL_HIGH>, the
+ * ICE at 0x1d90000 is the HC's second reg entry]. The phone's tree has no reset-gpios for the HC (XBL brings
+ * the UFS out of reset) and ufs_qcom_init() does without one when it is absent; if a bring-up stalls here,
+ * the kona-family convention would be TLMM 175 [待实机验证].
+ */
+&ufs_mem_hc {
+	status = "okay";
+};
+
+&ufs_mem_phy {
+	status = "okay";
+};
+
+/*
+ * USB 2.0 as a device: U-Boot's fastboot (the bootargs say androidboot.usbcontroller=a600000.dwc3 [fdt], the
+ * primary controller). The SuperSpeed QMP (a USB3+DP combo on sm8250) is left as ABL left it: U-Boot's
+ * mach-snapdragon/of_fixup.c strips it from the DWC3 node when no driver is bound, and the glue only sees
+ * the HS PHY below -- the same arrangement the POCO X5 Pro runs its loader over.
+ */
+&usb_1 {
+	qcom,select-utmi-as-pipe-clk;
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	phys = <&usb_1_hsphy>;
+	phy-names = "usb2-phy";
+	status = "okay";
+};
+
+&usb_1_hsphy {
+	status = "okay";
+};
