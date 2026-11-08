@@ -45,18 +45,23 @@
 		ranges;
 
 		/*
-		 * The panel as ABL left it: Samsung ANA6706, DSC command mode, 1440 x 3168 (the bootargs name
-		 * msm_drm.dsi_display0=qcom,mdss_dsi_oppo19811_samsung_1440_3168_dsc_cmd [fdt]). The splash is
-		 * cont_splash_region: 0x9c000000 + 0x2300000 [fdt, UniXNU]. 32 bits a8r8g8b8, as on the other
-		 * sm8250 boards; ABL's actual pitch and byte order have not been measured on this phone yet
-		 * [待实机验证]. No clocks: U-Boot keeps the display running by not touching it.
+		 * The panel as ABL left it: Samsung ANA6706, DSC command mode. The splash is
+		 * cont_splash_region: 0x9c000000 + 0x2300000 [fdt, UniXNU]. 32 bits a8r8g8b8.
+		 * Measured live from the DPU pipeline on 2026-11-08 (loader `oem dpu` snapshot):
+		 * Android had last driven the FHD+ mode -- VIG0+VIG1 bonded, SRC_SIZE 540x2376 each
+		 * at source-x 0/540, stride 4320, DSC bonded picture 1080x2376 slice 540x72 -- so the
+		 * scanout is 1080 x 2376, stride 4320, NOT the panel's native QHD the bootargs name
+		 * (msm_drm.dsi_display0=...oppo19811_samsung_1440_3168_dsc_cmd) suggests. The loader
+		 * re-reads the live pipeline at boot and corrects itself, so this node only has to
+		 * be right for U-Boot's own console. No clocks: U-Boot keeps the display running by
+		 * not touching it.
 		 */
 		framebuffer0: framebuffer@9c000000 {
 			compatible = "simple-framebuffer";
-			reg = <0x0 0x9c000000 0x0 (1440 * 3168 * 4)>;
-			width = <1440>;
-			height = <3168>;
-			stride = <(1440 * 4)>;
+			reg = <0x0 0x9c000000 0x0 (1080 * 2376 * 4)>;
+			width = <1080>;
+			height = <2376>;
+			stride = <(1080 * 4)>;
 			format = "a8r8g8b8";
 		};
 	};
